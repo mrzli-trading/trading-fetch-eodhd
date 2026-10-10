@@ -27,7 +27,7 @@
 # Environment / secrets
 .env
 .env.*
-!.env.*.template
+!.env*.template
 
 # Editor/OS
 .DS_Store
