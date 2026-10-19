@@ -9,6 +9,8 @@ module Eodhd
             OUTPUT_HEADERS = ["Timestamp", "Datetime", "Open", "High", "Low", "Close", "Volume"].freeze
             FILE_PROGRESS_LOG_EVERY = 50
 
+            class Error < StandardError; end
+
             def initialize(log:, io:)
               @log = log
               @io = io
@@ -79,13 +81,18 @@ module Eodhd
 
               splits_file = Eodhd::Shared::Path.splits_file(exchange, symbol)
               dividends_file = Eodhd::Shared::Path.dividends_file(exchange, symbol)
+              eod_file = Eodhd::Shared::Path.raw_eod_file(exchange, symbol)
+
+              dividends_json = @io.file_exists?(dividends_file) ? @io.read_text(dividends_file) : "[]"
+              dividends_raw = Eodhd::Shared::Parsing::DividendsParser.parse(dividends_json)
 
               unless should_process?(
                 force: force,
                 processed_files: processed_files,
                 raw_files: month_files,
                 splits_file: splits_file,
-                dividends_file: dividends_file
+                dividends_file: dividends_file,
+                eod_file: dividends_raw.empty? ? nil : eod_file
               )
                 @log.info("[#{exchange_symbol}] Skipping processed intraday (fresh)")
                 return nil
@@ -102,9 +109,10 @@ module Eodhd
               splits_raw = Eodhd::Shared::Parsing::SplitsParser.parse(splits_json)
               splits = Shared::SplitsProcessor.process(splits_raw, exchange: exchange)
 
-              dividends_json = @io.file_exists?(dividends_file) ? @io.read_text(dividends_file) : "[]"
-              dividends_raw = Eodhd::Shared::Parsing::DividendsParser.parse(dividends_json)
-              dividends = Shared::DividendsProcessor.process(dividends_raw, data_raw, exchange: exchange)
+              # Dividend multipliers use the official previous-day close from the
+              # raw daily data, as in `process eod`, so both get the same adjustment.
+              eod_data = dividends_raw.empty? ? [] : parse_eod_data(eod_file, exchange)
+              dividends = Shared::DividendsProcessor.process(dividends_raw, eod_data, exchange: exchange)
 
               @log.info("[#{exchange_symbol}] Applying price adjustments (#{splits.size} splits, #{dividends.size} dividends)...")
               data = Shared::PriceAdjust.apply(data_raw, splits, dividends)
@@ -141,7 +149,8 @@ module Eodhd
               processed_files:,
               raw_files:,
               splits_file:,
-              dividends_file:
+              dividends_file:,
+              eod_file:
             )
               return true if force
               return true if processed_files.empty?
@@ -168,7 +177,21 @@ module Eodhd
               dividends_mtime = @io.file_last_updated_at(dividends_file)
               return true if dividends_mtime && dividends_mtime > latest_processed_mtime
 
+              # Check raw daily file (an input only for symbols with dividends)
+              if eod_file
+                eod_mtime = @io.file_last_updated_at(eod_file)
+                return true if eod_mtime && eod_mtime > latest_processed_mtime
+              end
+
               false
+            end
+
+            def parse_eod_data(eod_file, exchange)
+              unless @io.file_exists?(eod_file)
+                raise Error, "Missing raw daily file #{eod_file}, needed for dividend adjustment"
+              end
+
+              Eodhd::Shared::Parsing::EodCsvParser.parse(@io.read_text(eod_file), exchange: exchange)
             end
 
             def parse_raw_data(month_files, exchange, symbol)
