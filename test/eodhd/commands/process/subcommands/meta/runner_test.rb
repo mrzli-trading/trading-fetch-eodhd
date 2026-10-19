@@ -44,7 +44,7 @@ describe Eodhd::Commands::Process::Subcommands::Meta::Runner do
         CSV
       )
 
-      result = runner.send(:get_daily_ranges)
+      result = runner.send(:get_daily_ranges, parallel: false, workers: 1)
 
       assert_equal 2, result.size
 
@@ -70,7 +70,7 @@ describe Eodhd::Commands::Process::Subcommands::Meta::Runner do
         CSV
       )
 
-      err = _ { runner.send(:get_daily_ranges) }
+      err = _ { runner.send(:get_daily_ranges, parallel: false, workers: 1) }
         .must_raise(Eodhd::Commands::Process::Subcommands::Meta::Runner::Error)
       _(err.message).must_match(/no data rows/i)
     end
@@ -94,7 +94,7 @@ describe Eodhd::Commands::Process::Subcommands::Meta::Runner do
         )
       end
 
-      runner.send(:get_daily_ranges)
+      runner.send(:get_daily_ranges, parallel: false, workers: 1)
 
       assert_includes(log.infos, "[us] Processed 100/101 EOD symbol file(s) (current: sym099)")
       assert_includes(log.infos, "[us] Processed 101/101 EOD symbol file(s) (current: sym100)")
@@ -133,7 +133,7 @@ describe Eodhd::Commands::Process::Subcommands::Meta::Runner do
         CSV
       )
 
-      result = runner.send(:get_intraday_ranges)
+      result = runner.send(:get_intraday_ranges, parallel: false, workers: 1)
 
       assert_equal 2, result.size
 
@@ -179,7 +179,7 @@ describe Eodhd::Commands::Process::Subcommands::Meta::Runner do
         CSV
       )
 
-      err = _ { runner.send(:get_intraday_ranges) }
+      err = _ { runner.send(:get_intraday_ranges, parallel: false, workers: 1) }
         .must_raise(Eodhd::Commands::Process::Subcommands::Meta::Runner::Error)
       _(err.message).must_match(/boundary file has no data rows/i)
     end
@@ -255,7 +255,7 @@ describe Eodhd::Commands::Process::Subcommands::Meta::Runner do
         CSV
       )
 
-      runner.process
+      runner.process(parallel: false, workers: 1)
 
       result = JSON.parse(io.read_text(Eodhd::Shared::Path.meta_file))
       assert_equal 2, result.size
