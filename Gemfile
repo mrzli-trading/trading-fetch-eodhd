@@ -2,8 +2,6 @@
 
 source "https://rubygems.org"
 
-ruby "~> 4.0"
-
 gem "colorize", "~> 1.1"
 gem "csv", "~> 3.3"
 gem "dotenv", "~> 3.2"

@@ -35,8 +35,5 @@ DEPENDENCIES
   tzinfo-data (~> 1.2026)
   zeitwerk (~> 2.7)
 
-RUBY VERSION
-   ruby 4.0.1p0
-
 BUNDLED WITH
    2.6.9
