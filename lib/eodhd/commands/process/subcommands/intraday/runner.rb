@@ -93,11 +93,11 @@ module Eodhd
               @log.info("[#{exchange_symbol}] Processing splits and dividends...")
               splits_json = @io.file_exists?(splits_file) ? @io.read_text(splits_file) : "[]"
               splits_raw = Eodhd::Shared::Parsing::SplitsParser.parse(splits_json)
-              splits = Shared::SplitsProcessor.process(splits_raw)
+              splits = Shared::SplitsProcessor.process(splits_raw, exchange: exchange)
 
               dividends_json = @io.file_exists?(dividends_file) ? @io.read_text(dividends_file) : "[]"
               dividends_raw = Eodhd::Shared::Parsing::DividendsParser.parse(dividends_json)
-              dividends = Shared::DividendsProcessor.process(dividends_raw, data_raw)
+              dividends = Shared::DividendsProcessor.process(dividends_raw, data_raw, exchange: exchange)
 
               @log.info("[#{exchange_symbol}] Applying price adjustments (#{splits.size} splits, #{dividends.size} dividends)...")
               data = Shared::PriceAdjust.apply(data_raw, splits, dividends)

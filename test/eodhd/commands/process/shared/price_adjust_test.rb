@@ -37,7 +37,7 @@ describe Eodhd::Commands::Process::Shared::PriceAdjust do
     JSON
 
     raw_splits = Eodhd::Shared::Parsing::SplitsParser.parse(splits_json)
-    segments = Eodhd::Commands::Process::Shared::SplitsProcessor.process(raw_splits)
+    segments = Eodhd::Commands::Process::Shared::SplitsProcessor.process(raw_splits, exchange: "us")
 
     adjusted = Eodhd::Commands::Process::Shared::PriceAdjust.apply(rows, segments, [])
 
@@ -64,7 +64,7 @@ describe Eodhd::Commands::Process::Shared::PriceAdjust do
 
     # dividend on 2024-01-11 uses previous close (2024-01-10 close=110)
     multiplier = (110.0 - 2.0) / 110.0
-    dividends = [ { timestamp: Date.parse("2024-01-11").to_time.to_i, multiplier: multiplier } ]
+    dividends = [ { timestamp: day_start("2024-01-11"), multiplier: multiplier } ]
 
     adjusted = Eodhd::Commands::Process::Shared::PriceAdjust.apply(rows, [], dividends)
 
@@ -86,10 +86,10 @@ describe Eodhd::Commands::Process::Shared::PriceAdjust do
     ]
 
     # One split on 2024-01-10: factor=2 (affects rows before 2024-01-10)
-    splits = [ { timestamp: Date.parse("2024-01-10").to_time.to_i, factor: 2.0 } ]
+    splits = [ { timestamp: day_start("2024-01-10"), factor: 2.0 } ]
 
     # One dividend on 2024-01-11 with prev close 120 and value 10 -> multiplier = (120-10)/120 = 0.9166...
-    dividends = [ { timestamp: Date.parse("2024-01-11").to_time.to_i, multiplier: (120.0 - 10.0) / 120.0 } ]
+    dividends = [ { timestamp: day_start("2024-01-11"), multiplier: (120.0 - 10.0) / 120.0 } ]
 
     adjusted = Eodhd::Commands::Process::Shared::PriceAdjust.apply(rows, splits, dividends)
 
@@ -103,10 +103,14 @@ describe Eodhd::Commands::Process::Shared::PriceAdjust do
     _(adjusted).must_equal expected
   end
 
+  def day_start(date_str)
+    Eodhd::Shared::ExchangeTime.day_start_timestamp("us", Date.parse(date_str))
+  end
+
   def drow(date_str, open, high, low, close, volume)
     date = Date.parse(date_str)
     {
-      timestamp: date.to_time.to_i,
+      timestamp: day_start(date_str),
       date: date,
       open: Float(open),
       high: Float(high),

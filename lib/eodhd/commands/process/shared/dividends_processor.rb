@@ -8,7 +8,7 @@ module Eodhd
           class Error < StandardError; end
 
           class << self
-            def process(dividends, data)
+            def process(dividends, data, exchange:)
               return [] if dividends.nil? || dividends.empty?
 
               data ||= []
@@ -18,7 +18,7 @@ module Eodhd
               sorted_dividends = dividends.sort_by(&:date)
 
               events = sorted_dividends.filter_map do |dividend|
-                ts = dividend.date.to_time.to_i
+                ts = Eodhd::Shared::ExchangeTime.day_start_timestamp(exchange, dividend.date)
                 idx = Util::BinarySearch.last_lt(sorted_data, ts) { |row| row[:timestamp] }
 
                 next if idx.nil?

@@ -10,7 +10,7 @@ module Eodhd
         class Error < StandardError; end
 
         class << self
-          def parse(raw_csv)
+          def parse(raw_csv, exchange:)
             csv = CSV.parse(raw_csv, headers: true)
             validate_headers(csv.headers)
 
@@ -21,7 +21,6 @@ module Eodhd
 
               begin
                 date = Date.iso8601(date_str)
-                timestamp = date.to_time.to_i
                 open = Float(row["Open"])
                 high = Float(row["High"])
                 low = Float(row["Low"])
@@ -30,6 +29,8 @@ module Eodhd
               rescue StandardError => e
                 raise Error, "Invalid data in row '#{date_str}': #{e.message}"
               end
+
+              timestamp = Eodhd::Shared::ExchangeTime.day_start_timestamp(exchange, date)
 
               rows << {
                 timestamp: timestamp,
