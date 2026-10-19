@@ -33,7 +33,7 @@ module Eodhd
         when "meta"
           args_parser = Subcommands::Meta::Args.new(container: container)
           parallel, workers = args_parser.parse(ARGV).deconstruct
-          runner.meta(parallel: parallel, workers: workers)
+          summary = runner.meta(parallel: parallel, workers: workers)
         else
           raise "Unknown subcommand: #{subcommand}"
         end

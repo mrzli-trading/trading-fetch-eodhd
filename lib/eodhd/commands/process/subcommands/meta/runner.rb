@@ -20,9 +20,10 @@ module Eodhd
 
             def process(parallel:, workers:)
               @log.info("Building meta summary from processed data...")
+              summary = Eodhd::Shared::RunSummary.new(name: "process meta")
 
               daily_ranges = get_daily_ranges(parallel: parallel, workers: workers)
-              intraday_ranges = get_intraday_ranges(parallel: parallel, workers: workers)
+              intraday_ranges = get_intraday_ranges(parallel: parallel, workers: workers, summary: summary)
 
               rows = combine_ranges(daily_ranges, intraday_ranges)
 
@@ -41,6 +42,9 @@ module Eodhd
               output_file = Eodhd::Shared::Path.meta_file
               @io.write_json(output_file, JSON.generate(rows), true)
               @log.info("Wrote #{output_file} (#{rows.size} entries)")
+
+              summary.log(@log)
+              summary
             end
 
             private
@@ -114,7 +118,7 @@ module Eodhd
               { from: from.iso8601, to: to.iso8601 }
             end
 
-            def get_intraday_ranges(parallel:, workers:)
+            def get_intraday_ranges(parallel:, workers:, summary:)
               root_dir = Eodhd::Shared::Path.data_intraday_dir
               unless @io.dir_exists?(root_dir)
                 @log.info("No processed intraday directory found: #{root_dir}")
@@ -160,19 +164,23 @@ module Eodhd
 
                   @log.info("[#{exchange}/#{symbol}] Found #{month_files.size} intraday month file(s)")
                   log_symbol_progress(exchange, item[:symbol_number], item[:total_symbols], symbol, "intraday symbol director#{item[:total_symbols] == 1 ? 'y' : 'ies'}")
-                  next nil if month_files.empty?
 
-                  range = intraday_range(month_files)
-                  next nil if range.nil?
+                  range_result = intraday_range(month_files)
 
                   {
                     exchange: exchange,
                     symbol: symbol,
-                    intraday_range: range
+                    intraday_range: range_result[:range],
+                    outcome: { intraday: empty_files_error(exchange, symbol, range_result[:empty_files]) }
                   }
                 end
 
-                results.concat(exchange_results.compact)
+                summary.add_all(exchange_results.map { |result| result[:outcome] })
+                results.concat(
+                  exchange_results
+                    .reject { |result| result[:intraday_range].nil? }
+                    .map { |result| result.except(:outcome) }
+                )
               end
 
               results
@@ -184,16 +192,41 @@ module Eodhd
               @log.info("[#{exchange}] Processed #{symbol_number}/#{total_symbols} #{noun} (current: #{symbol})")
             end
 
+            # Returns { range:, empty_files: }. Only the month files at either end are read:
+            # empty files are skipped inward until one with data rows is found.
+            # The range is nil when no file has data rows or a boundary datetime is empty.
             def intraday_range(relative_csv_paths)
               sorted_paths = relative_csv_paths.sort
-              return nil if sorted_paths.empty?
+              empty_files = []
+              return { range: nil, empty_files: empty_files } if sorted_paths.empty?
 
-              first_file = sorted_paths.first
-              first_rows = CSV.parse(@io.read_text(first_file), headers: true).each.to_a
-              if first_rows.empty?
-                @log.warn("Intraday first file has no data rows: #{first_file}")
-                return nil
+              first_file, first_rows = first_file_with_rows(sorted_paths, empty_files)
+              if first_file.nil?
+                @log.warn("Intraday month files all have no data rows: #{File.dirname(sorted_paths.first)}")
+                return { range: nil, empty_files: empty_files }
               end
+
+              later_paths = sorted_paths.drop(sorted_paths.index(first_file) + 1)
+              last_file, last_rows = first_file_with_rows(later_paths.reverse, empty_files)
+              last_file, last_rows = first_file, first_rows if last_file.nil?
+
+              { range: boundary_range(first_file, first_rows, last_file, last_rows), empty_files: empty_files }
+            end
+
+            # Returns [file, rows] for the first file in order with data rows, or nil.
+            # Adds each empty file passed over to empty_files.
+            def first_file_with_rows(relative_csv_paths, empty_files)
+              relative_csv_paths.each do |file|
+                rows = CSV.parse(@io.read_text(file), headers: true).each.to_a
+                return [file, rows] unless rows.empty?
+
+                @log.warn("Intraday month file has no data rows, skipping: #{file}")
+                empty_files << file
+              end
+              nil
+            end
+
+            def boundary_range(first_file, first_rows, last_file, last_rows)
               from_string = first_rows.first["Datetime"].to_s.strip
               if from_string.empty?
                 @log.warn("Intraday first file has empty datetime in first row: #{first_file}")
@@ -201,12 +234,6 @@ module Eodhd
               end
               from = DateTime.parse(from_string)
 
-              last_file = sorted_paths.last
-              last_rows = CSV.parse(@io.read_text(last_file), headers: true).each.to_a
-              if last_rows.empty?
-                @log.warn("Intraday last file has no data rows: #{last_file}")
-                return nil
-              end
               to_string = last_rows.last["Datetime"].to_s.strip
               if to_string.empty?
                 @log.warn("Intraday last file has empty datetime in last row: #{last_file}")
@@ -215,6 +242,13 @@ module Eodhd
               to = DateTime.parse(to_string)
 
               { from: from.iso8601, to: to.iso8601 }
+            end
+
+            # Returns nil when no empty month files were found, or the failure message.
+            def empty_files_error(exchange, symbol, empty_files)
+              return nil if empty_files.empty?
+
+              "[#{exchange}/#{symbol}] Intraday month file(s) with no data rows: #{empty_files.sort.join(', ')}"
             end
 
             def combine_ranges(daily_ranges, intraday_ranges)
