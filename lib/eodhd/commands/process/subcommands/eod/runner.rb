@@ -14,21 +14,27 @@ module Eodhd
             end
 
             def process(force:, parallel:, workers:)
+              summary = Eodhd::Shared::RunSummary.new(name: "process eod")
+
               raw_dir = Eodhd::Shared::Path.raw_eod_dir
               unless @io.dir_exists?(raw_dir)
                 @log.info("No raw EOD directory found: #{raw_dir}")
-                return
+                return summary
               end
 
               exchange_dirs = @io.list_relative_dirs(raw_dir).sort
               if exchange_dirs.empty?
                 @log.info("No exchange directories found under: #{raw_dir}")
-                return
+                return summary
               end
 
               exchange_dirs.each do |exchange_dir|
-                process_exchange(exchange_dir, force: force, parallel: parallel, workers: workers)
+                outcomes = process_exchange(exchange_dir, force: force, parallel: parallel, workers: workers)
+                summary.add_all(outcomes)
               end
+
+              summary.log(@log)
+              summary
             end
 
             private
@@ -37,7 +43,7 @@ module Eodhd
               symbol_files = @io.list_relative_files(exchange_dir)
                 .filter { |path| path.end_with?(".csv") }
                 .sort
-              return if symbol_files.empty?
+              return [] if symbol_files.empty?
 
               exchange = File.basename(exchange_dir)
               @log.info("[#{exchange}] Processing EOD (#{symbol_files.size} symbols)")
@@ -50,11 +56,12 @@ module Eodhd
                 }
               end
 
-              Util::ParallelExecutor.execute(symbol_data_list, parallel: parallel, workers: workers) do |symbol_data|
-                process_symbol(symbol_data, force: force)
+              Util::ParallelExecutor.map(symbol_data_list, parallel: parallel, workers: workers) do |symbol_data|
+                { eod: process_symbol(symbol_data, force: force) }
               end
             end
 
+            # Returns nil on success or skip, or the failure message.
             def process_symbol(symbol_data, force:)
               exchange = symbol_data[:exchange]
               symbol = symbol_data[:symbol]
@@ -74,7 +81,7 @@ module Eodhd
                 dividends_file: dividends_file,
               )
                 @log.info("[#{exchange_symbol}] Skipping processed EOD (fresh): #{processed_file}")
-                return
+                return nil
               end
 
               raw_csv = @io.read_text(symbol_file)
@@ -94,8 +101,11 @@ module Eodhd
 
               @io.write_csv(processed_file, processed_csv)
               @log.info("[#{exchange_symbol}] Wrote #{processed_file}")
+              nil
             rescue StandardError => e
-              @log.warn("[#{exchange_symbol}] Failed processing EOD: #{e.class}: #{e.message}")
+              message = "[#{exchange_symbol}] Failed processing EOD: #{e.class}: #{e.message}"
+              @log.warn(message)
+              message
             end
 
             def should_process?(

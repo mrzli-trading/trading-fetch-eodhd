@@ -15,28 +15,34 @@ module Eodhd
             end
 
             def process(force:, parallel:, workers:)
+              summary = Eodhd::Shared::RunSummary.new(name: "process intraday")
+
               raw_dir = Eodhd::Shared::Path.raw_intraday_processed_dir
               unless @io.dir_exists?(raw_dir)
                 @log.info("No raw intraday directory found: #{raw_dir}")
-                return
+                return summary
               end
 
               exchange_dirs = @io.list_relative_dirs(raw_dir).sort
               if exchange_dirs.empty?
                 @log.info("No exchange directories found under: #{raw_dir}")
-                return
+                return summary
               end
 
               exchange_dirs.each do |exchange_dir|
-                process_exchange(exchange_dir, force: force, parallel: parallel, workers: workers)
+                outcomes = process_exchange(exchange_dir, force: force, parallel: parallel, workers: workers)
+                summary.add_all(outcomes)
               end
+
+              summary.log(@log)
+              summary
             end
 
             private
 
             def process_exchange(exchange_dir, force:, parallel:, workers:)
               symbol_dirs = @io.list_relative_dirs(exchange_dir).sort
-              return if symbol_dirs.empty?
+              return [] if symbol_dirs.empty?
 
               exchange = File.basename(exchange_dir)
               @log.info("[#{exchange}] Processing intraday (#{symbol_dirs.size} symbols)")
@@ -49,11 +55,12 @@ module Eodhd
                 }
               end
 
-              Util::ParallelExecutor.execute(symbol_data_list, parallel: parallel, workers: workers) do |symbol_data|
-                process_symbol(symbol_data, force: force)
+              Util::ParallelExecutor.map(symbol_data_list, parallel: parallel, workers: workers) do |symbol_data|
+                { intraday: process_symbol(symbol_data, force: force) }
               end
             end
 
+            # Returns nil on success or skip, or the failure message.
             def process_symbol(symbol_data, force:)
               exchange = symbol_data[:exchange]
               symbol = symbol_data[:symbol]
@@ -63,7 +70,7 @@ module Eodhd
               month_files = @io.list_relative_files(symbol_dir)
                 .filter { |path| path.end_with?(".csv") }
                 .sort
-              return if month_files.empty?
+              return nil if month_files.empty?
 
               processed_dir = Eodhd::Shared::Path.data_intraday_symbol_dir(exchange, symbol)
               processed_files = @io.list_relative_files(processed_dir)
@@ -81,7 +88,7 @@ module Eodhd
                 dividends_file: dividends_file
               )
                 @log.info("[#{exchange_symbol}] Skipping processed intraday (fresh)")
-                return
+                return nil
               end
 
               @log.info("[#{exchange_symbol}] Processing intraday, found #{month_files.size} raw month file(s)")
@@ -122,8 +129,11 @@ module Eodhd
               end
 
               @log.info("[#{exchange_symbol}] Completed processing intraday")
+              nil
             rescue StandardError => e
-              @log.warn("[#{exchange_symbol}] Failed processing intraday: #{e.class}: #{e.message}")
+              message = "[#{exchange_symbol}] Failed processing intraday: #{e.class}: #{e.message}"
+              @log.warn(message)
+              message
             end
 
             def should_process?(
