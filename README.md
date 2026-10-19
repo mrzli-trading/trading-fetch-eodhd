@@ -60,6 +60,18 @@ sync
 sudo umount /home/mrzli/projects/ext
 ```
 
+## Updating Dependencies
+
+The Ruby version is pinned exactly in `.mise.toml`, and gem versions are pinned in `Gemfile.lock` (the `Gemfile` lists gems without versions). Both change only when you update them:
+
+```bash
+mise use --pin ruby@latest   # newest Ruby, written to .mise.toml as an exact version
+bundle update                # newest gems, written to Gemfile.lock
+rake test
+```
+
+`bundle outdated` lists available updates without changing anything. If an update breaks something, restore `Gemfile.lock` from Git and update gems one at a time with `bundle update <gem>`.
+
 ## Running Commands
 
 All commands support `--help` flag to show usage information.
