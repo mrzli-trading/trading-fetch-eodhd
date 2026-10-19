@@ -43,8 +43,13 @@ describe Eodhd::Commands::Fetch::Subcommands::Info::Runner do
     end
   end
 
-  class InfoPaymentRequiredApi < InfoFakeApi
+  # Both kinds raise, so no thread writes files while the temp dir is being removed.
+  class InfoPaymentRequiredApi
     def get_splits_json(_exchange, _symbol)
+      raise Eodhd::Shared::Api::PaymentRequiredError, "402"
+    end
+
+    def get_dividends_json(_exchange, _symbol)
       raise Eodhd::Shared::Api::PaymentRequiredError, "402"
     end
   end
@@ -133,8 +138,14 @@ describe Eodhd::Commands::Fetch::Subcommands::Info::Runner do
       )
       runner = Eodhd::Commands::Fetch::Subcommands::Info::Runner.new(container: container, shared: InfoFakeShared.new)
 
-      assert_raises(Eodhd::Shared::Api::PaymentRequiredError) do
-        runner.fetch(force: false, parallel: false, workers: 1)
+      report_on_exception = Thread.report_on_exception
+      Thread.report_on_exception = false
+      begin
+        assert_raises(Eodhd::Shared::Api::PaymentRequiredError) do
+          runner.fetch(force: false, parallel: false, workers: 1)
+        end
+      ensure
+        Thread.report_on_exception = report_on_exception
       end
     end
   end
