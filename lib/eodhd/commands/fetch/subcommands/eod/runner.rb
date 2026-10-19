@@ -26,11 +26,16 @@ module Eodhd
             private
 
             def fetch_eod_for_symbols(symbol_entries, force:, parallel:, workers:)
-              Util::ParallelExecutor.execute(symbol_entries, parallel: parallel, workers: workers) do |entry|
-                fetch_single(entry, force: force)
+              outcomes = Util::ParallelExecutor.map(symbol_entries, parallel: parallel, workers: workers) do |entry|
+                { eod: fetch_single(entry, force: force) }
               end
+
+              summary = Eodhd::Shared::RunSummary.new(name: "fetch eod").add_all(outcomes)
+              summary.log(@log)
+              summary
             end
 
+            # Returns nil on success or skip, or the failure message.
             def fetch_single(symbol_entry, force:)
               exchange = symbol_entry[:exchange]
               type = symbol_entry[:type]
@@ -41,7 +46,7 @@ module Eodhd
 
               unless force || @shared.file_stale?(relative_path)
                 @log.info("[#{exchange_symbol}] Skipping EOD (fresh): #{relative_path}")
-                return
+                return nil
               end
 
               begin
@@ -49,10 +54,13 @@ module Eodhd
                 csv = @api.get_eod_data_csv(exchange, symbol)
                 @io.write_csv(relative_path, csv)
                 @log.info("[#{exchange_symbol}] Wrote #{relative_path}")
+                nil
               rescue StandardError => e
                 raise if e.is_a?(Eodhd::Shared::Api::PaymentRequiredError)
 
-                @log.warn("[#{exchange_symbol}] Failed EOD: #{e.class}: #{e.message}")
+                message = "[#{exchange_symbol}] Failed EOD: #{e.class}: #{e.message}"
+                @log.warn(message)
+                message
               end
             end
           end

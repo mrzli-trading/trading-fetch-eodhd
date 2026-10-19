@@ -27,9 +27,13 @@ module Eodhd
             private
 
             def fetch_symbols_for_exchanges(exchange_items, force:, parallel:, workers:)
-              Util::ParallelExecutor.execute(exchange_items, parallel: parallel, workers: workers) do |item|
-                fetch_symbols_for_exchange(item[:exchange], force: force, existing_paths: item[:existing_paths])
+              outcomes = Util::ParallelExecutor.map(exchange_items, parallel: parallel, workers: workers) do |item|
+                { symbols: fetch_symbols_for_exchange(item[:exchange], force: force, existing_paths: item[:existing_paths]) }
               end
+
+              summary = Eodhd::Shared::RunSummary.new(name: "fetch symbols").add_all(outcomes)
+              summary.log(@log)
+              summary
             end
 
             def build_exchange_items(exchanges)
@@ -38,10 +42,11 @@ module Eodhd
               end
             end
 
+            # Returns nil on success or skip, or the failure message.
             def fetch_symbols_for_exchange(exchange, force:, existing_paths:)
               if !force && existing_paths.any? && existing_paths.none? { |path| @shared.file_stale?(path) }
                 @log.info("[#{exchange}] Skipping symbols (fresh): #{File.join(Eodhd::Shared::Path.symbols_dir, Util::String.kebab_case(exchange), '*.json')}")
-                return
+                return nil
               end
 
               @log.info("[#{exchange}] Fetching symbols#{force ? ' (forced)' : ''}...")
@@ -62,10 +67,13 @@ module Eodhd
                   @io.write_json(relative_path, JSON.generate(items), true)
                   @log.info("[#{exchange}] Wrote #{relative_path}")
                 end
+                nil
               rescue StandardError => e
                 raise if e.is_a?(Eodhd::Shared::Api::PaymentRequiredError)
 
-                @log.warn("[#{exchange}] Failed symbols: #{e.class}: #{e.message}")
+                message = "[#{exchange}] Failed symbols: #{e.class}: #{e.message}"
+                @log.warn(message)
+                message
               end
             end
 

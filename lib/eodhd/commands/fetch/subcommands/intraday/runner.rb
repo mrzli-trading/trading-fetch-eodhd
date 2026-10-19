@@ -59,11 +59,16 @@ module Eodhd
             private
 
             def fetch_intraday_for_symbols(symbol_entries, recheck_start_date:, parallel:, workers:)
-              Util::ParallelExecutor.execute(symbol_entries, parallel: parallel, workers: workers) do |entry|
-                fetch_single_symbol(entry, recheck_start_date: recheck_start_date)
+              outcomes = Util::ParallelExecutor.map(symbol_entries, parallel: parallel, workers: workers) do |entry|
+                { intraday: fetch_single_symbol(entry, recheck_start_date: recheck_start_date) }
               end
+
+              summary = Eodhd::Shared::RunSummary.new(name: "fetch intraday").add_all(outcomes)
+              summary.log(@log)
+              summary
             end
 
+            # Returns nil on success, or the failure message.
             def fetch_single_symbol(symbol_entry, recheck_start_date:)
               exchange = symbol_entry[:exchange]
               symbol = symbol_entry[:symbol]
@@ -116,10 +121,13 @@ module Eodhd
                 # Delete fetched directory after processing
                 @io.delete_dir(fetched_dir)
                 @log.info("[#{exchange_symbol}] Deleted fetched intraday files after processing")
+                nil
               rescue StandardError => e
                 raise if e.is_a?(Eodhd::Shared::Api::PaymentRequiredError)
 
-                @log.warn("[#{exchange_symbol}] Failed intraday: #{e.class}: #{e.message}")
+                message = "[#{exchange_symbol}] Failed intraday: #{e.class}: #{e.message}"
+                @log.warn(message)
+                message
               end
             end
 

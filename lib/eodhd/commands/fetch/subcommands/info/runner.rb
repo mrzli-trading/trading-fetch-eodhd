@@ -26,9 +26,13 @@ module Eodhd
             private
 
             def fetch_info_for_symbols(symbol_entries, force:, parallel:, workers:)
-              Util::ParallelExecutor.execute(symbol_entries, parallel: parallel, workers: workers) do |entry|
+              outcomes = Util::ParallelExecutor.map(symbol_entries, parallel: parallel, workers: workers) do |entry|
                 fetch_single(entry, force: force)
               end
+
+              summary = Eodhd::Shared::RunSummary.new(name: "fetch info").add_all(outcomes)
+              summary.log(@log)
+              summary
             end
 
             def fetch_single(symbol_entry, force:)
@@ -52,9 +56,11 @@ module Eodhd
                   )
                 end
               ]
-              threads.each(&:value)
+              splits_error, dividends_error = threads.map(&:value)
+              { splits: splits_error, dividends: dividends_error }
             end
 
+            # Returns nil on success or skip, or the failure message.
             def fetch_info(symbol_entry, type, path_method, api_method, force:)
               exchange = symbol_entry[:exchange]
               symbol = symbol_entry[:symbol]
@@ -63,17 +69,20 @@ module Eodhd
               path = path_method.call(exchange, symbol)
               unless force || @shared.file_stale?(path)
                 @log.info("[#{exchange_symbol}] Skipping #{type} (fresh): #{path}")
-                return
+                return nil
               end
 
               @log.info("[#{exchange_symbol}] Fetching #{type} JSON#{force ? ' (forced)' : ''}...")
               data = api_method.call(exchange, symbol)
               @io.write_json(path, data, true)
               @log.info("[#{exchange_symbol}] Wrote #{path}")
+              nil
             rescue StandardError => e
               raise if e.is_a?(Eodhd::Shared::Api::PaymentRequiredError)
 
-              @log.warn("[#{exchange_symbol}] Failed #{type}: #{e.class}: #{e.message}")
+              message = "[#{exchange_symbol}] Failed #{type}: #{e.class}: #{e.message}"
+              @log.warn(message)
+              message
             end
 
           end
