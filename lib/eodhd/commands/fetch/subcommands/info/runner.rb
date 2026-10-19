@@ -33,18 +33,34 @@ module Eodhd
 
             def fetch_single(symbol_entry, force:)
               threads = [
-                Thread.new { fetch_info(symbol_entry, :splits, ->(e, s) { @api.get_splits_json(e, s) }, force: force) },
-                Thread.new { fetch_info(symbol_entry, :dividends, ->(e, s) { @api.get_dividends_json(e, s) }, force: force) }
+                Thread.new do
+                  fetch_info(
+                    symbol_entry,
+                    :splits,
+                    ->(e, s) { Eodhd::Shared::Path.splits_file(e, s) },
+                    ->(e, s) { @api.get_splits_json(e, s) },
+                    force: force
+                  )
+                end,
+                Thread.new do
+                  fetch_info(
+                    symbol_entry,
+                    :dividends,
+                    ->(e, s) { Eodhd::Shared::Path.dividends_file(e, s) },
+                    ->(e, s) { @api.get_dividends_json(e, s) },
+                    force: force
+                  )
+                end
               ]
               threads.each(&:value)
             end
 
-            def fetch_info(symbol_entry, type, api_method, force:)
+            def fetch_info(symbol_entry, type, path_method, api_method, force:)
               exchange = symbol_entry[:exchange]
               symbol = symbol_entry[:symbol]
               exchange_symbol = "#{exchange}/#{symbol}"
 
-              path = Eodhd::Shared::Path.public_send(type, exchange, symbol)
+              path = path_method.call(exchange, symbol)
               unless force || @shared.file_stale?(path)
                 @log.info("[#{exchange_symbol}] Skipping #{type} (fresh): #{path}")
                 return
