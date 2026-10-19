@@ -64,6 +64,8 @@ sudo umount /home/mrzli/projects/ext
 
 All commands support `--help` flag to show usage information.
 
+Commands that work through many symbols (`fetch symbols`, `fetch info`, `fetch eod`, `fetch intraday`, `process eod`, `process intraday`, `process meta`) keep going when one symbol fails, log a warning for it, and end with a summary of failures per kind with the first few error messages. They exit with status 1 if any item failed, so check the exit status or the summary after a run. HTTP 402 (payment required) from the API still stops a fetch immediately.
+
 ### Fetch Data
 
 Fetches data from EODHD API.
@@ -231,3 +233,9 @@ The project organizes fetched and processed data in the following structure (roo
 
 - `raw/`: Unprocessed data as fetched from EODHD API
 - `data/`: Processed data with splits/dividends adjustments applied
+
+### Price Adjustments
+
+- A split or dividend takes effect at midnight at the start of its date in the exchange's time zone (America/New_York for `us`), independent of the machine's time zone. Rows (daily rows and intraday bars) before that moment are adjusted; intraday bars from the previous evening session are therefore adjusted too.
+- The dividend multiplier is `(previous close - dividend) / previous close`, using the previous trading day's official close from `raw/eod`. Daily and intraday data use the same multiplier, so `process intraday` needs the raw daily file for any symbol that has dividends, and fails that symbol if it is missing.
+- `process meta` takes each symbol's intraday range from its first and last month files that contain data. Empty month files at either end are skipped with a warning and reported as failures.
